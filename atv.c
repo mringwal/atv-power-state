@@ -65,7 +65,7 @@ static char line_buffer[200];
 static int line_pos = 0;
 
 static const char * ACTIVATE_SLEEP_TAG = "Blocking events on the way down to sleep";
-static const char * SIRI_TAG = "<Info>: usagePage:0xc usage:0x4";
+static const char * SIRI_TAG = "usagePage:0xc usage:0x4";
 
 static int find_tag(const char * tag){
 	int i;
