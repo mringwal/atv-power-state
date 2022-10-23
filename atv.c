@@ -64,10 +64,13 @@ static int old_stuff;
 static char line_buffer[200];
 static int line_pos = 0;
 
-// 
+// suffix indicates tvOS version
 static const char * ACTIVATE_SLEEP_TAG_12 = "Blocking events on the way down to sleep";
 static const char * ACTIVATE_SLEEP_TAG_13 = "Clearing boot count prior to sleep";
+static const char * ACTIVATE_SLEEP_TAG_16 = "Releasing power source";
+
 static const char * SIRI_TAG = "usagePage:0xc usage:0x4 downEvent:1";
+static const char * SIRI_TAG_16 = "page:0xC usage:0x4 downEvent:1";
 
 static int find_tag(const char * tag){
 	int i;
@@ -88,7 +91,13 @@ static void process_line(void){
 	if (find_tag(ACTIVATE_SLEEP_TAG_13)){
 		update_handler(0);
 	}
+	if (find_tag(ACTIVATE_SLEEP_TAG_16)){
+		update_handler(0);
+	}
 	if (find_tag(SIRI_TAG)){
+		update_handler(1);
+	}
+	if (find_tag(SIRI_TAG_16)){
 		update_handler(1);
 	}
 	line_pos = 0;
