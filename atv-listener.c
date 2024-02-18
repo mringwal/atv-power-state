@@ -40,16 +40,36 @@
 #include <unistd.h>
 #include <signal.h>
 
+#ifdef HAVE_LIBCURL
+#include <curl/curl.h>
+#include <stdlib.h>
+
+#endif
+
 static int quit_flag = 0;
 
 static char const * udid;
 static int use_network;
+
+#ifdef HAVE_LIBCURL
+static char short_options[] = "hu:n1:0:";
+#else
 static char short_options[] = "hu:n";
+#endif
+
+#ifdef HAVE_LIBCURL
+static char const * on_url;
+static char const * off_url;
+#endif
 
 static struct option long_options[] = {
         {"help", no_argument,       NULL,   'h'},
         {"udid", required_argument, NULL,   'u'},
         {"network", no_argument, NULL,      'n'},
+#ifdef HAVE_LIBCURL
+        {"on",   required_argument, NULL,   '1'},
+        {"off",  required_argument, NULL,   '0'},
+#endif
         {0, 0, 0, 0}
 };
 
@@ -57,12 +77,20 @@ static char *help_options[] = {
         "print (this) help.",
         "target specific device by UDID",
         "connect to network device",
+#ifdef HAVE_LIBCURL
+        "HTTP GET request when Apple TV is turned on.",
+        "HTTP GET request when Apple TV is turned off.",
+#endif
 };
 
 static char *option_arg_name[] = {
         "",
         "UDID",
         "",
+#ifdef HAVE_LIBCURL
+        "URL",
+        "URL",
+#endif
 };
 
 static void usage(const char *name){
@@ -74,8 +102,34 @@ static void usage(const char *name){
     }
 }
 
+#ifdef HAVE_LIBCURL
+static void get_request(const char * url){
+    CURL *curl;
+    CURLcode res;
+
+    printf("HTTP GET Request: %s\n", url);
+    if (url == NULL){
+        return;
+    }
+
+    // from curl/simple.c
+    curl = curl_easy_init();
+    if(curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        res = curl_easy_perform(curl);
+        if(res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+        curl_easy_cleanup(curl);
+    }
+}
+#endif
+
 static void update_handler(int state){
 	printf("ATV update, new state %u\n", state);
+#ifdef HAVE_LIBCURL
+    get_request(state ? on_url : off_url);
+#endif
 }
 
 static void clean_exit(int sig)
@@ -112,6 +166,14 @@ int main(int argc, char * argv[]){
             case 'n':
                 use_network = 1;
                 break;
+#ifdef HAVE_LIBCURL
+            case '1':
+                on_url = optarg;
+                break;
+            case '0':
+                off_url = optarg;
+                break;
+#endif
             case 'h':
             default:
                 usage(argv[0]);
