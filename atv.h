@@ -38,9 +38,11 @@
 
 /**
  * @brief start monitoring ATV and report on state changes
+ * @param use_network
+ * @param udid of device, or NULL
  * @param update_handler to be called when state changes
  */
-void atv_init(void (*update_handler)(int new_state));
+void atv_init(void (*update_handler)(int), int use_network, const char *udid);
 
 /**
  * @brief stop monitoring

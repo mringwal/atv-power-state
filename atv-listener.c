@@ -34,11 +34,45 @@
  */
 
 #include "atv.h"
+#include <getopt.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
 
 static int quit_flag = 0;
+
+static char const * udid;
+static int use_network;
+static char short_options[] = "hu:n";
+
+static struct option long_options[] = {
+        {"help", no_argument,       NULL,   'h'},
+        {"udid", required_argument, NULL,   'u'},
+        {"network", no_argument, NULL,      'n'},
+        {0, 0, 0, 0}
+};
+
+static char *help_options[] = {
+        "print (this) help.",
+        "target specific device by UDID",
+        "connect to network device",
+};
+
+static char *option_arg_name[] = {
+        "",
+        "UDID",
+        "",
+};
+
+static void usage(const char *name){
+    unsigned int i;
+    printf( "usage:\n\t%s [options]\n", name );
+    printf("valid options:\n");
+    for( i=0; long_options[i].name != 0; i++) {
+        printf("--%-10s| -%c  %-10s\t\t%s\n", long_options[i].name, long_options[i].val, option_arg_name[i], help_options[i] );
+    }
+}
 
 static void update_handler(int state){
 	printf("ATV update, new state %u\n", state);
@@ -59,7 +93,33 @@ int main(int argc, char * argv[]){
 	signal(SIGPIPE, SIG_IGN);
 #endif
 
-	atv_init(&update_handler);
+    while(true){
+        int c = getopt_long( argc, (char* const *)argv, short_options, long_options, NULL );
+        if (c < 0) {
+            break;
+        }
+        if (c == '?'){
+            break;
+        }
+        switch (c) {
+            case 'u':
+                if (!*optarg) {
+                    fprintf(stderr, "ERROR: UDID must not be empty!\n");
+                    usage(argv[0]);
+                    return EXIT_FAILURE;
+                }
+                break;
+            case 'n':
+                use_network = 1;
+                break;
+            case 'h':
+            default:
+                usage(argv[0]);
+                return EXIT_FAILURE;
+        }
+    }
+
+    atv_init(&update_handler, use_network, udid);
 	while (!quit_flag){
 		sleep(1);
 	}

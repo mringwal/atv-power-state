@@ -55,6 +55,7 @@ static void (*update_handler)(int state);
 static int quit_flag = 0;
 
 static char* udid = NULL;
+static int use_network;
 
 static idevice_t device = NULL;
 static syslog_relay_client_t syslog = NULL;
@@ -117,35 +118,66 @@ static void syslog_callback(char c, void *user_data)
 static int start_logging(void)
 {
 	line_pos = 0;
-	idevice_error_t ret = idevice_new(&device, udid);
-	if (ret != IDEVICE_E_SUCCESS) {
-		fprintf(stderr, "Device with udid %s not found!?\n", udid);
-		return -1;
-	}
+    idevice_error_t ret = idevice_new_with_options(&device, udid, (use_network) ? IDEVICE_LOOKUP_NETWORK : IDEVICE_LOOKUP_USBMUX);
+    if (ret != IDEVICE_E_SUCCESS) {
+        fprintf(stderr, "Device with udid %s not found!?\n", udid);
+        return -1;
+    }
 
-	/* start and connect to syslog_relay service */
-	syslog_relay_error_t serr = SYSLOG_RELAY_E_UNKNOWN_ERROR;
-	serr = syslog_relay_client_start_service(device, &syslog, "idevicesyslog");
-	if (serr != SYSLOG_RELAY_E_SUCCESS) {
-		fprintf(stderr, "ERROR: Could not start service com.apple.syslog_relay.\n");
-		idevice_free(device);
-		device = NULL;
-		return -1;
-	}
+    lockdownd_client_t lockdown = NULL;
+    lockdownd_error_t lerr = lockdownd_client_new_with_handshake(device, &lockdown, "atv-power-state");
+    if (lerr != LOCKDOWN_E_SUCCESS) {
+        fprintf(stderr, "ERROR: Could not connect to lockdownd: %d\n", lerr);
+        idevice_free(device);
+        device = NULL;
+        return -1;
+    }
 
-	/* start capturing syslog */
-	serr = syslog_relay_start_capture(syslog, syslog_callback, NULL);
-	if (serr != SYSLOG_RELAY_E_SUCCESS) {
-		fprintf(stderr, "ERROR: Unable tot start capturing syslog.\n");
-		syslog_relay_client_free(syslog);
-		syslog = NULL;
-		idevice_free(device);
-		device = NULL;
-		return -1;
-	}
+    /* start syslog_relay service */
+    lockdownd_service_descriptor_t svc = NULL;
+    lerr = lockdownd_start_service(lockdown, SYSLOG_RELAY_SERVICE_NAME, &svc);
+    if (lerr == LOCKDOWN_E_PASSWORD_PROTECTED) {
+        fprintf(stderr, "*** Device is passcode protected, enter passcode on the device to continue ***\n");
+        while (!quit_flag) {
+            lerr = lockdownd_start_service(lockdown, SYSLOG_RELAY_SERVICE_NAME, &svc);
+            if (lerr != LOCKDOWN_E_PASSWORD_PROTECTED) {
+                break;
+            }
+            sleep(1);
+        }
+    }
+    if (lerr != LOCKDOWN_E_SUCCESS) {
+        fprintf(stderr, "ERROR: Could not connect to lockdownd: %d\n", lerr);
+        idevice_free(device);
+        device = NULL;
+        return -1;
+    }
+    lockdownd_client_free(lockdown);
 
-	fprintf(stdout, "[connected]\n");
-	fflush(stdout);
+    /* connect to syslog_relay service */
+    syslog_relay_error_t serr = SYSLOG_RELAY_E_UNKNOWN_ERROR;
+    serr = syslog_relay_client_new(device, svc, &syslog);
+    lockdownd_service_descriptor_free(svc);
+    if (serr != SYSLOG_RELAY_E_SUCCESS) {
+        fprintf(stderr, "ERROR: Could not start service com.apple.syslog_relay.\n");
+        idevice_free(device);
+        device = NULL;
+        return -1;
+    }
+
+    /* start capturing syslog */
+    serr = syslog_relay_start_capture_raw(syslog, syslog_callback, NULL);
+    if (serr != SYSLOG_RELAY_E_SUCCESS) {
+        fprintf(stderr, "ERROR: Unable tot start capturing syslog.\n");
+        syslog_relay_client_free(syslog);
+        syslog = NULL;
+        idevice_free(device);
+        device = NULL;
+        return -1;
+    }
+
+    fprintf(stdout, "[connected:%s]\n", udid);
+    fflush(stdout);
 
 	return 0;
 }
@@ -167,7 +199,14 @@ static void stop_logging(void)
 
 static void device_event_cb(const idevice_event_t* event, void* userdata)
 {
-	if (event->event == IDEVICE_DEVICE_ADD) {
+    if (use_network && event->conn_type != CONNECTION_NETWORK) {
+        return;
+    }
+    if (!use_network && event->conn_type != CONNECTION_USBMUXD) {
+        return;
+    }
+
+    if (event->event == IDEVICE_DEVICE_ADD) {
 		if (!syslog) {
 			if (!udid) {
 				udid = strdup(event->udid);
@@ -175,6 +214,8 @@ static void device_event_cb(const idevice_event_t* event, void* userdata)
 			if (strcmp(udid, event->udid) == 0) {
 				if (start_logging() != 0) {
 					fprintf(stderr, "Could not start logger for udid %s\n", udid);
+				} else {
+					printf("[connected] start tracking power state\n");
 				}
 			}
 		}
@@ -186,20 +227,25 @@ static void device_event_cb(const idevice_event_t* event, void* userdata)
 	}
 }
 
-void atv_init(void (*handler)(int new_state)){
+void atv_init(void (*handler)(int), int param_use_network, const char *param_udid) {
 
 	int i;
 
-	update_handler = handler;
+    use_network = param_use_network;
+    udid = (char *) param_udid;
+	update_handler = update_handler;
 
 	int num = 0;
-	char **devices = NULL;
-	idevice_get_device_list(&devices, &num);
-	idevice_device_list_free(devices);
-	if (num == 0) {
-		fprintf(stderr, "No device found. Plug in a device or pass UDID with -u to wait for device to be available.\n");
-		return;
-	}
+    idevice_info_t *devices = NULL;
+    idevice_get_device_list_extended(&devices, &num);
+    idevice_device_list_extended_free(devices);
+    if (num == 0) {
+        if (!udid) {
+            fprintf(stderr, "No device found. Plug in a device or pass UDID with -u to wait for device to be available.\n");
+            return;
+        }
+        fprintf(stderr, "Waiting for device with UDID %s to become available...\n", udid);
+    }
 
 	idevice_event_subscribe(device_event_cb, NULL);
 
