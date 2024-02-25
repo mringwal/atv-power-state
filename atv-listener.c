@@ -39,11 +39,10 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
+#include <stdlib.h>
 
 #ifdef HAVE_LIBCURL
 #include <curl/curl.h>
-#include <stdlib.h>
-
 #endif
 
 static int quit_flag = 0;
